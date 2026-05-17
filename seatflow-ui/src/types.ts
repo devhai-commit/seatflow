@@ -1,6 +1,6 @@
 export interface BehaviorRecord {
   id: string;
-  type: 'bonus' | 'penalty' | 'info';
+  type: 'bonus' | 'penalty' | 'info' | 'critical';
   description: string;
   score: number;
   timestamp: number;
@@ -10,6 +10,7 @@ export interface Student {
   id: string;
   fullName: string;
   shortName: string;
+  studentCode?: string;
   currentSeatAssignedTimestamp: number | null;
   parentPhone?: string;
   address?: string;

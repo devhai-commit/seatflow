@@ -74,6 +74,9 @@ export default function App() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupLeaders, setGroupLeaders] = useState<Map<number, string>>(new Map());
 
+  // Class name
+  const [className, setClassName] = useState('');
+
   // Arrangement mode
   const [arrangementMode, setArrangementMode] = useState<ArrangementMode>('automatic');
 
@@ -133,6 +136,7 @@ export default function App() {
             }
           }
           if (settings.arrangement_mode) setArrangementMode(settings.arrangement_mode as ArrangementMode);
+          if (settings.class_name) setClassName(settings.class_name as string);
         }
 
         try {
@@ -146,6 +150,7 @@ export default function App() {
             id: s.id,
             fullName: s.full_name,
             shortName: s.short_name || '',
+            studentCode: s.student_code ?? undefined,
             currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
               ? Number(s.current_seat_assigned_timestamp) : null,
             parentPhone: s.parent_phone ?? undefined,
@@ -212,6 +217,7 @@ export default function App() {
 
     try {
       await api.updateStudent(updatedStudent.id, {
+        student_code: updatedStudent.studentCode ?? null,
         parent_phone: updatedStudent.parentPhone,
         address: updatedStudent.address,
         weight: updatedStudent.weight,
@@ -251,6 +257,21 @@ export default function App() {
       console.error('Lỗi đồng bộ danh sách:', err);
       throw err;
     }
+  }, []);
+
+  const handleDeleteStudentsBatch = useCallback(async (ids: string[]) => {
+    await api.deleteStudentsBatch(ids);
+    setStudents(prev => prev.filter(s => !ids.includes(s.id)));
+    setSeatingChart(prev =>
+      prev.map(row =>
+        row.map(table => table.filter(s => !ids.includes(s.id)))
+      )
+    );
+  }, []);
+
+  const handleClassNameChange = useCallback(async (name: string) => {
+    setClassName(name);
+    await api.saveSettings({ class_name: name });
   }, []);
 
   // Refresh students list from server (for add/delete operations)
@@ -689,6 +710,9 @@ export default function App() {
             onUpdateStudent={handleUpdateSingleStudent}
             onSyncStudents={handleSyncStudents}
             onRefreshStudents={handleRefreshStudents}
+            onDeleteStudents={handleDeleteStudentsBatch}
+            className={className}
+            onClassNameChange={handleClassNameChange}
           />
         )}
 

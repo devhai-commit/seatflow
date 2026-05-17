@@ -10,13 +10,15 @@ CREATE TABLE IF NOT EXISTS app_settings (
   group_settings JSON,
   groups_data JSON,
   group_leaders JSON,
-  arrangement_mode VARCHAR(20) DEFAULT 'automatic'
+  arrangement_mode VARCHAR(20) DEFAULT 'automatic',
+  class_name VARCHAR(100) DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS students (
   id VARCHAR(36) PRIMARY KEY,
   full_name VARCHAR(255) NOT NULL,
   short_name VARCHAR(100),
+  student_code VARCHAR(50) DEFAULT NULL,
   parent_phone VARCHAR(20),
   address TEXT,
   weight VARCHAR(20),
@@ -29,7 +31,7 @@ CREATE TABLE IF NOT EXISTS students (
 CREATE TABLE IF NOT EXISTS behavior_records (
   id VARCHAR(36) PRIMARY KEY,
   student_id VARCHAR(36) NOT NULL,
-  type ENUM('bonus', 'penalty', 'info') NOT NULL,
+  type ENUM('bonus', 'penalty', 'info', 'critical') NOT NULL,
   description TEXT,
   score INT DEFAULT 0,
   timestamp BIGINT NOT NULL,
@@ -59,3 +61,9 @@ CREATE TABLE IF NOT EXISTS seating_history (
   created_at BIGINT NOT NULL,
   note VARCHAR(255) DEFAULT NULL
 );
+
+-- ── Migrations cho DB đã có (chạy 1 lần nếu bảng đã tồn tại) ──────────────
+-- MySQL 8.0: không hỗ trợ ADD COLUMN IF NOT EXISTS, chạy thủ công nếu cần:
+-- ALTER TABLE students ADD COLUMN student_code VARCHAR(50) DEFAULT NULL;
+-- ALTER TABLE app_settings ADD COLUMN class_name VARCHAR(100) DEFAULT NULL;
+-- ALTER TABLE behavior_records MODIFY COLUMN type ENUM('bonus','penalty','info','critical') NOT NULL;

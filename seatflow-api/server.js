@@ -224,7 +224,7 @@ app.get('/api/students', async (req, res) => {
       SELECT s.*, sa.assigned_at AS current_seat_assigned_timestamp
       FROM students s
       LEFT JOIN seating_assignments sa ON s.id = sa.student_id
-      ORDER BY s.full_name
+      ORDER BY SUBSTRING_INDEX(s.full_name, ' ', -1), s.full_name
     `);
     const [behaviors] = await pool.query('SELECT * FROM behavior_records');
     const result = students.map(s => ({
@@ -254,7 +254,7 @@ app.post('/api/students/sync', async (req, res) => {
       SELECT s.*, sa.assigned_at AS current_seat_assigned_timestamp
       FROM students s
       LEFT JOIN seating_assignments sa ON s.id = sa.student_id
-      ORDER BY s.full_name
+      ORDER BY SUBSTRING_INDEX(s.full_name, ' ', -1), s.full_name
     `);
     const [behaviors] = await pool.query('SELECT * FROM behavior_records');
     const result = students.map(s => ({
@@ -262,6 +262,34 @@ app.post('/api/students/sync', async (req, res) => {
       behavior_records: behaviors.filter(b => b.student_id === s.id),
     }));
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/students/batch — xóa nhiều học sinh cùng lúc
+app.delete('/api/students/batch', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Cần truyền mảng ids không rỗng' });
+    }
+    // Delete avatar files first
+    const [rows] = await pool.query(
+      `SELECT id, avatar_url FROM students WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    rows.forEach(r => {
+      if (r.avatar_url) {
+        const filePath = path.join(__dirname, r.avatar_url);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+    });
+    await pool.query(
+      `DELETE FROM students WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    res.json({ success: true, deleted: ids.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -15,7 +15,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export interface BehaviorRow {
   id: string;
   student_id: string;
-  type: 'bonus' | 'penalty' | 'info';
+  type: 'bonus' | 'penalty' | 'info' | 'critical';
   description: string;
   score: number;
   timestamp: number;
@@ -25,6 +25,7 @@ export interface StudentRow {
   id: string;
   full_name: string;
   short_name: string | null;
+  student_code: string | null;
   current_seat_assigned_timestamp: number | null; // from LEFT JOIN seating_assignments.assigned_at
   parent_phone: string | null;
   address: string | null;
@@ -66,6 +67,12 @@ export const api = {
       method: 'DELETE',
     }),
 
+  deleteStudentsBatch: (ids: string[]) =>
+    request<{ success: boolean; deleted: number }>('/api/students/batch', {
+      method: 'DELETE',
+      body: JSON.stringify({ ids }),
+    }),
+
   updateStudent: (id: string, data: Record<string, unknown>) =>
     request<{ success: boolean }>(`/api/students/${id}`, {
       method: 'PUT',
@@ -74,7 +81,7 @@ export const api = {
 
   addBehavior: (
     studentId: string,
-    data: { type: string; description: string; score: number; timestamp: number }
+    data: { type: 'bonus' | 'penalty' | 'info' | 'critical'; description: string; score: number; timestamp: number }
   ) =>
     request<BehaviorRow>(`/api/students/${studentId}/behavior`, {
       method: 'POST',

@@ -9,6 +9,9 @@ interface StudentManagerPageProps {
   onUpdateStudent: (updated: Student) => void;
   onSyncStudents: (names: string[]) => Promise<void>;
   onRefreshStudents?: () => Promise<void>;
+  onDeleteStudents?: (ids: string[]) => Promise<void>;
+  className?: string;
+  onClassNameChange?: (name: string) => void;
 }
 
 // ─── Preset violations / bonuses ──────────────────────────────────────────────
@@ -22,7 +25,12 @@ const PENALTY_PRESETS = [
   { label: 'Nói tục, chửi bậy', points: 5 },
   { label: 'Mất trật tự trong giờ', points: 5 },
   { label: 'Dùng điện thoại trong giờ', points: 5 },
-  { label: 'Đánh nhau', points: 50 },
+];
+
+// Lỗi đặc biệt: ảnh hưởng xếp loại cả kỳ
+const CRITICAL_PRESETS = [
+  { label: 'Quay cóp', points: 100 },
+  { label: 'Đánh nhau', points: 100 },
 ];
 
 const BONUS_PRESETS = [
@@ -51,35 +59,48 @@ function getMonthlyRating(score: number) {
   return { label: 'Kém', color: 'bg-red-100 text-red-700' };
 }
 
-function getSem1Rating(score: number) {
-  if (score >= 1620) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
-  if (score >= 1170) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
-  if (score >= 900) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
-  if (score >= 720) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
-  return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+// hasCritical: nếu có lỗi đặc biệt (quay cóp / đánh nhau), xếp loại tối đa là Khá
+function getSem1Rating(score: number, hasCritical = false) {
+  const raw = (() => {
+    if (score >= 1620) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
+    if (score >= 1170) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+    if (score >= 900) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
+    if (score >= 720) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+  })();
+  if (hasCritical && raw.label === 'Tốt') return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+  return raw;
 }
 
-function getSem2Rating(score: number) {
-  if (score >= 1530) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
-  if (score >= 1105) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
-  if (score >= 850) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
-  if (score >= 680) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
-  return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+function getSem2Rating(score: number, hasCritical = false) {
+  const raw = (() => {
+    if (score >= 1530) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
+    if (score >= 1105) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+    if (score >= 850) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
+    if (score >= 680) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+  })();
+  if (hasCritical && raw.label === 'Tốt') return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+  return raw;
 }
 
-function getYearRating(score: number) {
-  if (score >= 1575) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
-  if (score >= 1138) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
-  if (score >= 875) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
-  if (score >= 700) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
-  return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+function getYearRating(score: number, hasCritical = false) {
+  const raw = (() => {
+    if (score >= 1575) return { label: 'Tốt', color: 'bg-green-100 text-green-700' };
+    if (score >= 1138) return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+    if (score >= 875) return { label: 'TB', color: 'bg-yellow-100 text-yellow-700' };
+    if (score >= 700) return { label: 'Yếu', color: 'bg-orange-100 text-orange-700' };
+    return { label: 'Kém', color: 'bg-red-100 text-red-700' };
+  })();
+  if (hasCritical && raw.label === 'Tốt') return { label: 'Khá', color: 'bg-blue-100 text-blue-700' };
+  return raw;
 }
 
 // ─── Week helpers ──────────────────────────────────────────────────────────────
 function getWeekStart(ts: number): Date {
   const d = new Date(ts);
-  const day = d.getDay(); // 0=Sun
-  const diff = day === 0 ? 6 : day - 1; // days back to Monday
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
   const mon = new Date(d);
   mon.setDate(d.getDate() - diff);
   mon.setHours(0, 0, 0, 0);
@@ -97,8 +118,14 @@ function fmtDate(d: Date) {
   return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
-// ─── Misc helpers ──────────────────────────────────────────────────────────────
+// Sắp xếp theo tên (từ cuối cùng trong họ tên đầy đủ)
+function getFirstName(fullName: string) {
+  const parts = fullName.trim().split(' ');
+  return parts[parts.length - 1];
+}
+
 type TabId = 'info' | 'behavior' | 'semester';
+type BehaviorMode = 'penalty' | 'bonus' | 'critical';
 
 function getInitials(name: string) {
   const parts = name.trim().split(' ');
@@ -113,7 +140,15 @@ const avatarColors = [
 ];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
-export default function StudentManagerPage({ students, onUpdateStudent, onSyncStudents, onRefreshStudents }: StudentManagerPageProps) {
+export default function StudentManagerPage({
+  students,
+  onUpdateStudent,
+  onSyncStudents,
+  onRefreshStudents,
+  onDeleteStudents,
+  className: classNameProp = '',
+  onClassNameChange,
+}: StudentManagerPageProps) {
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<TabId>('info');
   const [search, setSearch] = useState('');
@@ -123,18 +158,31 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
   const [isAddingStudent, setIsAddingStudent] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  // Multi-select state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Class name local edit state
+  const [classNameEdit, setClassNameEdit] = useState(classNameProp);
+  const [isEditingClass, setIsEditingClass] = useState(false);
+  const classInputRef = useRef<HTMLInputElement>(null);
+
   // Behavior form
-  const [behaviorType, setBehaviorType] = useState<'bonus' | 'penalty'>('penalty');
+  const [behaviorMode, setBehaviorMode] = useState<BehaviorMode>('penalty');
   const [customReason, setCustomReason] = useState('');
   const [selectedPreset, setSelectedPreset] = useState('');
   const [pointAmount, setPointAmount] = useState(5);
 
-  // Week navigation (Monday of viewed week)
+  // Week navigation
   const [weekStart, setWeekStart] = useState<Date>(() => getWeekStart(Date.now()));
 
-  // Semester tab: month picker for monthly breakdown
+  // Semester tab: month picker
   const [viewMonth, setViewMonth] = useState(new Date().getMonth());
   const [viewYear, setViewYear] = useState(new Date().getFullYear());
+
+  useEffect(() => {
+    setClassNameEdit(classNameProp);
+  }, [classNameProp]);
 
   useEffect(() => {
     if (!selectedStudentId && students.length > 0) {
@@ -142,9 +190,26 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     }
   }, [students, selectedStudentId]);
 
+  // Reset selection when leaving selection mode
+  useEffect(() => {
+    if (!selectionMode) setSelectedIds(new Set());
+  }, [selectionMode]);
+
+  // Sort by first name (last word of full name)
+  const sorted = useMemo(
+    () => [...students].sort((a, b) => {
+      const fa = getFirstName(a.fullName).toLowerCase();
+      const fb = getFirstName(b.fullName).toLowerCase();
+      if (fa !== fb) return fa.localeCompare(fb, 'vi');
+      return a.fullName.localeCompare(b.fullName, 'vi');
+    }),
+    [students]
+  );
+
   const filtered = useMemo(
-    () => students.filter(s => s.fullName.toLowerCase().includes(search.toLowerCase())),
-    [students, search]
+    () => sorted.filter(s => s.fullName.toLowerCase().includes(search.toLowerCase()) ||
+      (s.studentCode || '').toLowerCase().includes(search.toLowerCase())),
+    [sorted, search]
   );
 
   const selected = useMemo(
@@ -152,7 +217,6 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     [students, selectedStudentId]
   );
 
-  // Records for the current week
   const weekEnd = useMemo(() => getWeekEnd(weekStart), [weekStart]);
   const weekRecords = useMemo(() => {
     if (!selected?.behaviorRecords) return [];
@@ -162,45 +226,53 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
   }, [selected, weekStart, weekEnd]);
 
   const weeklyScore = useMemo(
-    () => 100 + weekRecords.reduce((acc, r) => acc + r.score, 0),
+    () => 100 + weekRecords.filter(r => r.type !== 'critical').reduce((acc, r) => acc + r.score, 0),
     [weekRecords]
   );
 
-  // Monthly records for breakdown in semester tab
   const monthlyScore = useMemo(() => {
     if (!selected?.behaviorRecords) return 400;
     const recs = selected.behaviorRecords.filter(r => {
       const d = new Date(r.timestamp);
-      return d.getMonth() === viewMonth && d.getFullYear() === viewYear;
+      return d.getMonth() === viewMonth && d.getFullYear() === viewYear && r.type !== 'critical';
     });
     return 400 + recs.reduce((acc, r) => acc + r.score, 0);
   }, [selected, viewMonth, viewYear]);
 
-  // Semester summary
   const semesterSummary = useMemo(() => {
     if (!selected) return null;
     const records = selected.behaviorRecords || [];
-    // Sem1: months Aug(7)–Jan(0)
-    const sem1Records = records.filter(r => [7, 8, 9, 10, 11, 0].includes(new Date(r.timestamp).getMonth()));
-    // Sem2: months Feb(1)–Jul(6)
-    const sem2Records = records.filter(r => [1, 2, 3, 4, 5, 6].includes(new Date(r.timestamp).getMonth()));
-    const sem1Score = 1800 + sem1Records.reduce((acc, r) => acc + r.score, 0);
-    const sem2Score = 1700 + sem2Records.reduce((acc, r) => acc + r.score, 0);
-    const yearScore = (sem1Score + sem2Score) / 2;
 
-    // Monthly breakdown
-    const monthsMap = new Map<string, { score: number; month: number; year: number }>();
+    // Kỳ I: tháng 8–1 (index 7,8,9,10,11,0)
+    const sem1Records = records.filter(r => [7, 8, 9, 10, 11, 0].includes(new Date(r.timestamp).getMonth()));
+    // Kỳ II: tháng 2–7 (index 1,2,3,4,5,6)
+    const sem2Records = records.filter(r => [1, 2, 3, 4, 5, 6].includes(new Date(r.timestamp).getMonth()));
+
+    const hasCriticalSem1 = sem1Records.some(r => r.type === 'critical');
+    const hasCriticalSem2 = sem2Records.some(r => r.type === 'critical');
+
+    const sem1Score = 1800 + sem1Records.filter(r => r.type !== 'critical').reduce((acc, r) => acc + r.score, 0);
+    const sem2Score = 1700 + sem2Records.filter(r => r.type !== 'critical').reduce((acc, r) => acc + r.score, 0);
+    const yearScore = (sem1Score + sem2Score) / 2;
+    const hasCriticalYear = hasCriticalSem1 || hasCriticalSem2;
+
+    const monthsMap = new Map<string, { score: number; month: number; year: number; hasCritical: boolean }>();
     records.forEach(r => {
       const d = new Date(r.timestamp);
       const key = `${d.getFullYear()}-${d.getMonth()}`;
-      if (!monthsMap.has(key)) monthsMap.set(key, { score: 400, month: d.getMonth(), year: d.getFullYear() });
-      monthsMap.get(key)!.score += r.score;
+      if (!monthsMap.has(key)) monthsMap.set(key, { score: 400, month: d.getMonth(), year: d.getFullYear(), hasCritical: false });
+      const entry = monthsMap.get(key)!;
+      if (r.type === 'critical') {
+        entry.hasCritical = true;
+      } else {
+        entry.score += r.score;
+      }
     });
     const monthlyStats = Array.from(monthsMap.values()).sort((a, b) =>
       a.year !== b.year ? a.year - b.year : a.month - b.month
     );
 
-    return { sem1Score, sem2Score, yearScore, monthlyStats };
+    return { sem1Score, sem2Score, yearScore, monthlyStats, hasCriticalSem1, hasCriticalSem2, hasCriticalYear };
   }, [selected]);
 
   const handleUpdateProfile = (field: keyof Student, value: unknown) => {
@@ -249,12 +321,16 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     if (!reason) { alert('Vui lòng nhập hoặc chọn lý do'); return; }
 
     setIsProcessing(true);
-    const finalScore = behaviorType === 'bonus' ? Math.abs(pointAmount) : -Math.abs(pointAmount);
+    const isCritical = behaviorMode === 'critical';
+    const finalScore = isCritical
+      ? -Math.abs(pointAmount)
+      : behaviorMode === 'bonus' ? Math.abs(pointAmount) : -Math.abs(pointAmount);
+    const type = isCritical ? 'critical' : behaviorMode as 'bonus' | 'penalty';
     const timestamp = Date.now();
 
     try {
       const newRecord = await api.addBehavior(selected.id, {
-        type: behaviorType,
+        type,
         description: reason,
         score: finalScore,
         timestamp,
@@ -268,7 +344,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
       });
       setCustomReason('');
       setSelectedPreset('');
-      setPointAmount(5);
+      setPointAmount(isCritical ? 100 : 5);
     } catch (err) {
       console.error('Lỗi thêm hạnh kiểm:', err);
       alert('Có lỗi xảy ra khi lưu dữ liệu.');
@@ -300,10 +376,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     try {
       await api.addStudent(fullName);
       setIsAddModalOpen(false);
-      // Refresh student list to show the new student
-      if (onRefreshStudents) {
-        await onRefreshStudents();
-      }
+      if (onRefreshStudents) await onRefreshStudents();
       alert('Thêm học sinh thành công!');
     } catch (err) {
       console.error('Lỗi thêm học sinh:', err);
@@ -315,17 +388,12 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
 
   const handleDeleteStudent = async () => {
     if (!selected) return;
-    if (!confirm(`Bạn có chắc chắn muốn xóa học sinh "${selected.fullName}"? Hành động này không thể hoàn tác.`)) {
-      return;
-    }
+    if (!confirm(`Bạn có chắc chắn muốn xóa học sinh "${selected.fullName}"? Hành động này không thể hoàn tác.`)) return;
     setIsProcessing(true);
     try {
       await api.deleteStudent(selected.id);
       setSelectedStudentId('');
-      // Refresh student list after deletion
-      if (onRefreshStudents) {
-        await onRefreshStudents();
-      }
+      if (onRefreshStudents) await onRefreshStudents();
       alert('Xóa học sinh thành công!');
     } catch (err) {
       console.error('Lỗi xóa học sinh:', err);
@@ -335,11 +403,58 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     }
   };
 
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.size} học sinh đã chọn? Hành động này không thể hoàn tác.`)) return;
+    setIsProcessing(true);
+    try {
+      const ids = Array.from(selectedIds);
+      if (onDeleteStudents) await onDeleteStudents(ids);
+      else {
+        // fallback: xóa lần lượt
+        for (const id of ids) await api.deleteStudent(id);
+        if (onRefreshStudents) await onRefreshStudents();
+      }
+      if (selectedIds.has(selectedStudentId)) setSelectedStudentId('');
+      setSelectedIds(new Set());
+      setSelectionMode(false);
+      alert(`Đã xóa ${ids.length} học sinh thành công!`);
+    } catch (err) {
+      console.error('Lỗi xóa nhiều học sinh:', err);
+      alert('Có lỗi khi xóa học sinh.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(s => s.id)));
+    }
+  };
+
+  const toggleSelectStudent = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSaveClassName = async () => {
+    setIsEditingClass(false);
+    if (onClassNameChange) await onClassNameChange(classNameEdit);
+  };
+
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportExcel = () => {
-    const data = students.map((s, idx) => ({
+    const data = sorted.map((s, idx) => ({
       'STT': idx + 1,
+      'Mã HS': s.studentCode || '',
       'Họ và tên': s.fullName,
       'Tên ngắn': s.shortName || '',
       'SĐT phụ huynh': s.parentPhone || '',
@@ -400,7 +515,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     { id: 'semester', label: 'Tổng kết học kỳ', icon: 'assessment' },
   ];
 
-  const presets = behaviorType === 'penalty' ? PENALTY_PRESETS : BONUS_PRESETS;
+  const presets = behaviorMode === 'bonus' ? BONUS_PRESETS : behaviorMode === 'critical' ? CRITICAL_PRESETS : PENALTY_PRESETS;
 
   return (
     <div className="flex overflow-hidden" style={{ paddingTop: '64px', height: '100vh' }}>
@@ -413,75 +528,129 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Tìm kiếm học sinh..."
+              placeholder="Tên hoặc mã học sinh..."
               className="w-full pl-10 pr-4 py-2 bg-[#d8e3fb] border-none rounded-xl text-sm focus:ring-2 focus:ring-[#3525cd] focus:bg-white transition-all focus:outline-none"
             />
           </div>
-          <div className="mt-4 flex items-center justify-between">
-            <span className="text-sm text-[#464555]">Tổng số: {students.length} học sinh</span>
-            <div className="flex gap-1">
-              <button
-                onClick={() => setIsAddModalOpen(true)}
-                title="Thêm học sinh mới"
-                className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white bg-[#3525cd] hover:bg-[#2b1fa8] rounded-lg transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">add</span>
-                Thêm
-              </button>
-              <button
-                onClick={handleExportExcel}
-                disabled={students.length === 0}
-                title="Xuất danh sách ra Excel"
-                className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#3525cd] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors disabled:opacity-40"
-              >
-                <span className="material-symbols-outlined text-[15px]">download</span>
-                Excel
-              </button>
-              <button
-                onClick={() => excelInputRef.current?.click()}
-                title="Nhập danh sách từ Excel"
-                className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#3525cd] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors"
-              >
-                <span className="material-symbols-outlined text-[15px]">upload</span>
-                Nhập
-              </button>
-              <input
-                ref={excelInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={handleImportExcel}
-              />
-            </div>
+          <div className="mt-3 flex items-center justify-between gap-1">
+            {selectionMode ? (
+              <>
+                <label className="flex items-center gap-1.5 text-xs text-[#464555] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === filtered.length && filtered.length > 0}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 accent-[#3525cd]"
+                  />
+                  {selectedIds.size > 0 ? `${selectedIds.size} đã chọn` : 'Chọn tất cả'}
+                </label>
+                <div className="flex gap-1">
+                  <button
+                    onClick={handleBatchDelete}
+                    disabled={selectedIds.size === 0 || isProcessing}
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">delete</span>
+                    Xóa ({selectedIds.size})
+                  </button>
+                  <button
+                    onClick={() => setSelectionMode(false)}
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#464555] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <span className="text-sm text-[#464555]">Tổng: {students.length} học sinh</span>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => setIsAddModalOpen(true)}
+                    title="Thêm học sinh"
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white bg-[#3525cd] hover:bg-[#2b1fa8] rounded-lg transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">add</span>
+                    Thêm
+                  </button>
+                  <button
+                    onClick={() => setSelectionMode(true)}
+                    title="Chọn nhiều để xóa"
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#3525cd] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">checklist</span>
+                    Chọn
+                  </button>
+                  <button
+                    onClick={handleExportExcel}
+                    disabled={students.length === 0}
+                    title="Xuất Excel"
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#3525cd] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors disabled:opacity-40"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">download</span>
+                  </button>
+                  <button
+                    onClick={() => excelInputRef.current?.click()}
+                    title="Nhập Excel"
+                    className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-[#3525cd] bg-[#e7eeff] hover:bg-[#dbe2fa] rounded-lg transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">upload</span>
+                  </button>
+                  <input ref={excelInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleImportExcel} />
+                </div>
+              </>
+            )}
           </div>
         </div>
+
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
           {filtered.map((student, idx) => {
             const isActive = student.id === selectedStudentId;
+            const isChecked = selectedIds.has(student.id);
             return (
               <button
                 key={student.id}
-                onClick={() => setSelectedStudentId(student.id)}
+                onClick={() => {
+                  if (selectionMode) {
+                    toggleSelectStudent(student.id);
+                  } else {
+                    setSelectedStudentId(student.id);
+                  }
+                }}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl transition-colors text-left ${
-                  isActive
+                  isActive && !selectionMode
                     ? 'bg-[#dbe2fa] text-[#5d6478] border-l-4 border-[#3525cd] rounded-r-xl'
+                    : isChecked
+                    ? 'bg-[#e2dfff] border-l-4 border-[#3525cd] rounded-r-xl'
                     : 'hover:bg-[#d8e3fb]'
                 }`}
               >
-                <div className={`w-10 h-10 rounded-full overflow-hidden flex-shrink-0 ${!student.avatarUrl ? (isActive ? 'bg-[#3525cd]' : avatarColors[idx % avatarColors.length].split(' ')[0]) : ''}`}>
-                  {student.avatarUrl ? (
-                    <img src={`http://localhost:3001${student.avatarUrl}`} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className={`w-full h-full flex items-center justify-center font-bold text-sm ${isActive ? 'bg-[#3525cd] text-white' : avatarColors[idx % avatarColors.length]}`}>
-                      {getInitials(student.fullName)}
-                    </div>
-                  )}
-                </div>
+                {selectionMode ? (
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleSelectStudent(student.id)}
+                    onClick={e => e.stopPropagation()}
+                    className="w-4 h-4 accent-[#3525cd] flex-shrink-0"
+                  />
+                ) : (
+                  <div className={`w-10 h-10 rounded-full overflow-hidden flex-shrink-0`}>
+                    {student.avatarUrl ? (
+                      <img src={`http://localhost:3001${student.avatarUrl}`} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className={`w-full h-full flex items-center justify-center font-bold text-sm ${isActive ? 'bg-[#3525cd] text-white' : avatarColors[idx % avatarColors.length]}`}>
+                        {getInitials(student.fullName)}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="flex-1 overflow-hidden">
                   <p className="text-sm font-semibold text-[#111c2d] truncate">{student.fullName}</p>
-                  <p className="text-xs text-[#464555]">Mã HS: 2024{String(idx + 1).padStart(3, '0')}</p>
+                  <p className="text-xs text-[#464555]">
+                    {student.studentCode ? `Mã: ${student.studentCode}` : <span className="italic opacity-60">Chưa có mã</span>}
+                  </p>
                 </div>
-                {(student.isSpecialNeeds || student.isNearsighted) && (
+                {(student.isSpecialNeeds || student.isNearsighted) && !selectionMode && (
                   <span className="material-symbols-outlined text-[#3525cd] text-[18px]" style={{ fontVariationSettings: "'FILL' 1" }}>
                     stars
                   </span>
@@ -503,22 +672,17 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
           <div className="max-w-5xl mx-auto p-8 space-y-4">
             {/* Header card */}
             <div className="relative bg-white border border-[#c7c4d8] rounded-xl p-6 shadow-sm flex flex-col md:flex-row items-center gap-8">
-              {/* Avatar with upload overlay */}
+              {/* Avatar */}
               <div className="relative flex-shrink-0 group">
                 <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white shadow-md">
                   {selected.avatarUrl ? (
-                    <img
-                      src={`http://localhost:3001${selected.avatarUrl}`}
-                      alt={selected.fullName}
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={`http://localhost:3001${selected.avatarUrl}`} alt={selected.fullName} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-[#e2dfff] flex items-center justify-center text-3xl font-bold text-[#3525cd]">
                       {getInitials(selected.fullName)}
                     </div>
                   )}
                 </div>
-                {/* Hover overlay */}
                 <button
                   onClick={() => avatarInputRef.current?.click()}
                   disabled={isUploadingAvatar}
@@ -541,18 +705,36 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     <span className="material-symbols-outlined text-[14px]">close</span>
                   </button>
                 )}
-                <input
-                  ref={avatarInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  className="hidden"
-                  onChange={handleAvatarUpload}
-                />
+                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleAvatarUpload} />
               </div>
+
               <div className="flex-1 text-center md:text-left space-y-2">
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
                   <h1 className="text-3xl font-bold text-[#111c2d]">{selected.fullName}</h1>
-                  <span className="px-3 py-1 bg-[#e2dfff] text-[#0f0069] text-sm rounded-full border border-[#4f46e5]">Lớp 9A1</span>
+                  {/* Editable class badge */}
+                  {isEditingClass ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        ref={classInputRef}
+                        value={classNameEdit}
+                        onChange={e => setClassNameEdit(e.target.value)}
+                        onBlur={handleSaveClassName}
+                        onKeyDown={e => { if (e.key === 'Enter') handleSaveClassName(); if (e.key === 'Escape') { setClassNameEdit(classNameProp); setIsEditingClass(false); } }}
+                        placeholder="Nhập tên lớp..."
+                        className="px-2 py-1 text-sm border-2 border-[#4f46e5] rounded-full bg-[#e2dfff] text-[#0f0069] focus:outline-none w-32"
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setIsEditingClass(true); setTimeout(() => classInputRef.current?.focus(), 50); }}
+                      title="Nhấp để chỉnh sửa tên lớp"
+                      className="group flex items-center gap-1 px-3 py-1 bg-[#e2dfff] text-[#0f0069] text-sm rounded-full border border-[#4f46e5] hover:bg-[#d3cfff] transition-colors"
+                    >
+                      {classNameEdit || 'Chưa đặt tên lớp'}
+                      <span className="material-symbols-outlined text-[13px] opacity-0 group-hover:opacity-70 transition-opacity">edit</span>
+                    </button>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center justify-center md:justify-start gap-2 pt-2">
                   {selected.isNearsighted && (
@@ -614,6 +796,16 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
+                        <label className="text-sm font-medium text-[#464555]">Mã học sinh</label>
+                        <input
+                          type="text"
+                          value={selected.studentCode || ''}
+                          onChange={e => handleUpdateProfile('studentCode', e.target.value || undefined)}
+                          placeholder="Nhập mã học sinh..."
+                          className="w-full border border-[#c7c4d8] rounded-lg px-3 py-2 bg-[#f0f3ff] text-sm focus:ring-2 focus:ring-[#3525cd]/20 focus:border-[#3525cd] focus:outline-none"
+                        />
+                      </div>
+                      <div className="space-y-2">
                         <label className="text-sm font-medium text-[#464555]">Số điện thoại phụ huynh</label>
                         <input
                           type="tel"
@@ -640,7 +832,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                           className="w-full border border-[#c7c4d8] rounded-lg px-3 py-2 bg-[#f0f3ff] text-sm focus:ring-2 focus:ring-[#3525cd]/20 focus:border-[#3525cd] focus:outline-none"
                         />
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-2 md:col-span-2">
                         <label className="text-sm font-medium text-[#464555]">Chiều cao (cm)</label>
                         <div>
                           <input
@@ -702,7 +894,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
               </div>
             )}
 
-            {/* ── Behavior Tab (weekly) ── */}
+            {/* ── Behavior Tab ── */}
             {activeTab === 'behavior' && (
               <div className="grid grid-cols-1 md:grid-cols-12 gap-4 pb-12">
                 {/* Left: score + form */}
@@ -721,10 +913,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                         <span className="material-symbols-outlined text-[18px] text-[#3525cd]">chevron_right</span>
                       </button>
                     </div>
-                    <button
-                      onClick={goCurrentWeek}
-                      className="w-full mt-1 text-[10px] text-[#3525cd] hover:underline"
-                    >
+                    <button onClick={goCurrentWeek} className="w-full mt-1 text-[10px] text-[#3525cd] hover:underline">
                       Tuần hiện tại
                     </button>
                   </div>
@@ -738,27 +927,43 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     <span className={`inline-block mt-2 px-4 py-1 rounded-full font-bold text-sm ${getWeeklyRating(weeklyScore).color}`}>
                       {getWeeklyRating(weeklyScore).label}
                     </span>
-                    <p className="text-[10px] text-[#777587] mt-1">
-                      Xếp loại: ≥90 Tốt · ≥65 Khá · ≥50 TB · ≥40 Yếu · &lt;40 Kém
-                    </p>
+                    {weekRecords.some(r => r.type === 'critical') && (
+                      <div className="mt-2 flex items-center justify-center gap-1 text-xs text-red-700 bg-red-50 rounded-lg px-2 py-1">
+                        <span className="material-symbols-outlined text-[14px]">warning</span>
+                        Có lỗi đặc biệt — ảnh hưởng xếp loại kỳ
+                      </div>
+                    )}
                   </div>
 
-                  {/* Add record form */}
+                  {/* Mode selector */}
                   <div className="space-y-3">
-                    <div className="flex gap-2">
+                    <div className="flex gap-1.5">
                       <button
-                        onClick={() => { setBehaviorType('penalty'); setSelectedPreset(''); setPointAmount(5); }}
+                        onClick={() => { setBehaviorMode('penalty'); setSelectedPreset(''); setPointAmount(5); }}
                         className={`flex-1 py-2 text-xs font-bold rounded-lg border-2 transition-all ${
-                          behaviorType === 'penalty' ? 'border-red-500 bg-red-50 text-red-700' : 'border-[#c7c4d8] text-[#464555]'
+                          behaviorMode === 'penalty' ? 'border-red-500 bg-red-50 text-red-700' : 'border-[#c7c4d8] text-[#464555]'
                         }`}
                       >Vi phạm</button>
                       <button
-                        onClick={() => { setBehaviorType('bonus'); setSelectedPreset(''); setPointAmount(5); }}
+                        onClick={() => { setBehaviorMode('bonus'); setSelectedPreset(''); setPointAmount(5); }}
                         className={`flex-1 py-2 text-xs font-bold rounded-lg border-2 transition-all ${
-                          behaviorType === 'bonus' ? 'border-green-500 bg-green-50 text-green-700' : 'border-[#c7c4d8] text-[#464555]'
+                          behaviorMode === 'bonus' ? 'border-green-500 bg-green-50 text-green-700' : 'border-[#c7c4d8] text-[#464555]'
                         }`}
                       >Khen thưởng</button>
+                      <button
+                        onClick={() => { setBehaviorMode('critical'); setSelectedPreset(''); setPointAmount(100); }}
+                        className={`flex-1 py-2 text-xs font-bold rounded-lg border-2 transition-all ${
+                          behaviorMode === 'critical' ? 'border-purple-600 bg-purple-50 text-purple-700' : 'border-[#c7c4d8] text-[#464555]'
+                        }`}
+                      >Lỗi đặc biệt</button>
                     </div>
+
+                    {behaviorMode === 'critical' && (
+                      <div className="flex items-start gap-2 p-2.5 bg-purple-50 border border-purple-200 rounded-xl text-[10px] text-purple-800">
+                        <span className="material-symbols-outlined text-[16px] mt-0.5 flex-shrink-0">gavel</span>
+                        <span>Lỗi đặc biệt (quay cóp, đánh nhau) sẽ làm xếp loại học kỳ tương ứng <strong>không được Tốt</strong>, tối đa là <strong>Khá</strong>.</span>
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap gap-1">
                       {presets.map((p, i) => (
@@ -767,7 +972,11 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                           onClick={() => handleSelectPreset(p.label, p.points)}
                           className={`px-2 py-1 text-[10px] rounded-full border transition-colors ${
                             selectedPreset === p.label
-                              ? 'bg-[#3525cd] text-white border-[#3525cd]'
+                              ? behaviorMode === 'critical'
+                                ? 'bg-purple-600 text-white border-purple-600'
+                                : 'bg-[#3525cd] text-white border-[#3525cd]'
+                              : behaviorMode === 'critical'
+                              ? 'bg-white text-purple-700 border-purple-300 hover:border-purple-600'
                               : 'bg-white text-[#464555] border-[#c7c4d8] hover:border-[#3525cd]'
                           }`}
                         >
@@ -787,9 +996,9 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     <div className="flex gap-2 items-center">
                       <label className="text-xs text-[#464555]">Điểm:</label>
                       <input
-                        type="number" min="1" max="100" value={pointAmount}
+                        type="number" min="1" max="200" value={pointAmount}
                         onChange={e => setPointAmount(Number(e.target.value))}
-                        className="w-16 text-sm border border-[#c7c4d8] rounded-lg px-2 py-1 focus:outline-none bg-[#f0f3ff] font-bold"
+                        className="w-20 text-sm border border-[#c7c4d8] rounded-lg px-2 py-1 focus:outline-none bg-[#f0f3ff] font-bold"
                       />
                     </div>
 
@@ -797,7 +1006,11 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                       onClick={handleAddRecord}
                       disabled={isProcessing}
                       className={`w-full flex items-center justify-center gap-2 py-3 font-bold rounded-xl transition-colors text-sm text-white ${
-                        behaviorType === 'penalty' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                        behaviorMode === 'critical'
+                          ? 'bg-purple-700 hover:bg-purple-800'
+                          : behaviorMode === 'bonus'
+                          ? 'bg-green-600 hover:bg-green-700'
+                          : 'bg-red-600 hover:bg-red-700'
                       } disabled:opacity-50`}
                     >
                       <span className="material-symbols-outlined text-[18px]">add_circle</span>
@@ -824,26 +1037,25 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     </thead>
                     <tbody className="divide-y divide-[#c7c4d8]">
                       {weekRecords.length > 0 ? weekRecords.map(record => (
-                        <tr key={record.id} className="hover:bg-[#f0f3ff] transition-colors">
+                        <tr key={record.id} className={`hover:bg-[#f0f3ff] transition-colors ${record.type === 'critical' ? 'bg-purple-50' : ''}`}>
                           <td className="p-4 text-sm text-[#111c2d] whitespace-nowrap">
                             {new Date(record.timestamp).toLocaleDateString('vi-VN')}
                           </td>
                           <td className="p-4">
                             <span className={`px-2 py-0.5 rounded-lg text-xs font-medium ${
-                              record.type === 'bonus' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              record.type === 'bonus' ? 'bg-green-100 text-green-700'
+                              : record.type === 'critical' ? 'bg-purple-100 text-purple-800'
+                              : 'bg-red-100 text-red-700'
                             }`}>
-                              {record.type === 'bonus' ? 'Thưởng' : 'Vi phạm'}
+                              {record.type === 'bonus' ? 'Thưởng' : record.type === 'critical' ? 'Lỗi đặc biệt' : 'Vi phạm'}
                             </span>
                           </td>
                           <td className="p-4 text-sm text-[#111c2d]">{record.description}</td>
-                          <td className={`p-4 font-bold ${record.score > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          <td className={`p-4 font-bold ${record.score > 0 ? 'text-green-600' : record.type === 'critical' ? 'text-purple-700' : 'text-red-600'}`}>
                             {record.score > 0 ? '+' : ''}{record.score}
                           </td>
                           <td className="p-4">
-                            <button
-                              onClick={() => handleDeleteRecord(record.id)}
-                              className="text-[#c7c4d8] hover:text-red-600 transition-colors"
-                            >
+                            <button onClick={() => handleDeleteRecord(record.id)} className="text-[#c7c4d8] hover:text-red-600 transition-colors">
                               <span className="material-symbols-outlined text-[18px]">delete</span>
                             </button>
                           </td>
@@ -864,26 +1076,46 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
             {/* ── Semester Tab ── */}
             {activeTab === 'semester' && semesterSummary && (
               <div className="space-y-4 pb-12">
-                {/* Semester cards */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="p-6 rounded-2xl text-white shadow-lg" style={{ background: 'linear-gradient(135deg, #3525cd, #3a2cc1)' }}>
+                  <div className="p-6 rounded-2xl text-white shadow-lg relative" style={{ background: 'linear-gradient(135deg, #3525cd, #3a2cc1)' }}>
+                    {semesterSummary.hasCriticalSem1 && (
+                      <div className="absolute top-3 right-3 flex items-center gap-1 bg-purple-800/80 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                        <span className="material-symbols-outlined text-[11px]">gavel</span>Lỗi đặc biệt
+                      </div>
+                    )}
                     <p className="text-sm opacity-80 mb-1">Học kỳ 1 (18 tuần)</p>
-                    <h2 className="text-3xl font-bold mb-1">{getSem1Rating(semesterSummary.sem1Score).label}</h2>
+                    <h2 className="text-3xl font-bold mb-1">{getSem1Rating(semesterSummary.sem1Score, semesterSummary.hasCriticalSem1).label}</h2>
                     <div className="text-lg font-bold">{semesterSummary.sem1Score}<span className="text-sm opacity-70">/1800</span></div>
+                    {semesterSummary.hasCriticalSem1 && (
+                      <p className="text-[10px] opacity-70 mt-1">Giới hạn tối đa: Khá (do có lỗi đặc biệt)</p>
+                    )}
                   </div>
-                  <div className="p-6 rounded-2xl shadow-lg" style={{ background: 'linear-gradient(135deg, #dbe2fa, #575e72)', color: '#141b2c' }}>
+                  <div className="p-6 rounded-2xl shadow-lg relative" style={{ background: 'linear-gradient(135deg, #dbe2fa, #575e72)', color: '#141b2c' }}>
+                    {semesterSummary.hasCriticalSem2 && (
+                      <div className="absolute top-3 right-3 flex items-center gap-1 bg-purple-800/80 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                        <span className="material-symbols-outlined text-[11px]">gavel</span>Lỗi đặc biệt
+                      </div>
+                    )}
                     <p className="text-sm opacity-80 mb-1">Học kỳ 2 (17 tuần)</p>
-                    <h2 className="text-3xl font-bold mb-1">{getSem2Rating(semesterSummary.sem2Score).label}</h2>
+                    <h2 className="text-3xl font-bold mb-1">{getSem2Rating(semesterSummary.sem2Score, semesterSummary.hasCriticalSem2).label}</h2>
                     <div className="text-lg font-bold">{semesterSummary.sem2Score}<span className="text-sm opacity-70">/1700</span></div>
+                    {semesterSummary.hasCriticalSem2 && (
+                      <p className="text-[10px] opacity-70 mt-1">Giới hạn tối đa: Khá (do có lỗi đặc biệt)</p>
+                    )}
                   </div>
-                  <div className="p-6 rounded-2xl shadow-lg" style={{ background: 'linear-gradient(135deg, #e3dfff, #c3c0ff)', color: '#100069' }}>
+                  <div className="p-6 rounded-2xl shadow-lg relative" style={{ background: 'linear-gradient(135deg, #e3dfff, #c3c0ff)', color: '#100069' }}>
+                    {semesterSummary.hasCriticalYear && (
+                      <div className="absolute top-3 right-3 flex items-center gap-1 bg-purple-800/80 text-white text-[9px] px-1.5 py-0.5 rounded-full">
+                        <span className="material-symbols-outlined text-[11px]">gavel</span>Lỗi đặc biệt
+                      </div>
+                    )}
                     <p className="text-sm opacity-80 mb-1">Cả năm (TB kỳ I + II)</p>
-                    <h2 className="text-3xl font-bold mb-1">{getYearRating(semesterSummary.yearScore).label}</h2>
+                    <h2 className="text-3xl font-bold mb-1">{getYearRating(semesterSummary.yearScore, semesterSummary.hasCriticalYear).label}</h2>
                     <div className="text-lg font-bold">{semesterSummary.yearScore.toFixed(0)}<span className="text-sm opacity-70">/1750</span></div>
                   </div>
                 </div>
 
-                {/* Monthly breakdown with selector */}
+                {/* Monthly breakdown */}
                 <div className="bg-white border border-[#c7c4d8] rounded-xl overflow-hidden shadow-sm">
                   <div className="bg-[#f0f3ff] px-6 py-4 border-b border-[#c7c4d8] flex items-center gap-4">
                     <h3 className="text-sm font-bold text-[#464555] uppercase tracking-wide flex-1">Theo tháng</h3>
@@ -914,11 +1146,10 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                     <p className="text-[10px] text-[#777587] ml-auto">≥360 Tốt · ≥260 Khá · ≥200 TB · ≥160 Yếu</p>
                   </div>
 
-                  {/* All months summary */}
                   <table className="w-full">
                     <thead>
                       <tr>
-                        {['Tháng / Năm', 'Điểm', 'Xếp loại'].map(h => (
+                        {['Tháng / Năm', 'Điểm', 'Xếp loại', ''].map(h => (
                           <th key={h} className="px-6 py-3 text-left text-xs font-medium text-[#464555]">{h}</th>
                         ))}
                       </tr>
@@ -927,7 +1158,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                       {semesterSummary.monthlyStats.length > 0 ? semesterSummary.monthlyStats.map((stat, idx) => {
                         const rating = getMonthlyRating(stat.score);
                         return (
-                          <tr key={idx} className="hover:bg-[#f0f3ff] transition-colors">
+                          <tr key={idx} className={`hover:bg-[#f0f3ff] transition-colors ${stat.hasCritical ? 'bg-purple-50' : ''}`}>
                             <td className="px-6 py-4 text-sm text-[#111c2d]">Tháng {stat.month + 1} / {stat.year}</td>
                             <td className="px-6 py-4 text-sm font-bold text-[#3525cd]">{stat.score}</td>
                             <td className="px-6 py-4">
@@ -935,11 +1166,18 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                                 {rating.label}
                               </span>
                             </td>
+                            <td className="px-6 py-4">
+                              {stat.hasCritical && (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">
+                                  <span className="material-symbols-outlined text-[11px]">gavel</span>Lỗi đặc biệt
+                                </span>
+                              )}
+                            </td>
                           </tr>
                         );
                       }) : (
                         <tr>
-                          <td colSpan={3} className="px-6 py-8 text-center text-[#777587] text-sm">Chưa có dữ liệu nào.</td>
+                          <td colSpan={4} className="px-6 py-8 text-center text-[#777587] text-sm">Chưa có dữ liệu nào.</td>
                         </tr>
                       )}
                     </tbody>
@@ -967,6 +1205,10 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                       <p>≥1530: Tốt</p><p>≥1105: Khá</p><p>≥850: TB</p><p>≥680: Yếu</p><p>&lt;680: Kém</p>
                     </div>
                   </div>
+                  <div className="mt-3 flex items-start gap-2 p-2 bg-purple-50 border border-purple-200 rounded-lg text-[10px] text-purple-800">
+                    <span className="material-symbols-outlined text-[14px] flex-shrink-0 mt-0.5">gavel</span>
+                    <span>Lỗi đặc biệt (Quay cóp, Đánh nhau): xếp loại học kỳ tối đa <strong>Khá</strong>, dù điểm thực tế cao hơn.</span>
+                  </div>
                 </div>
               </div>
             )}
@@ -980,7 +1222,6 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
         )}
       </section>
 
-      {/* Add Student Modal */}
       <AddStudentModal
         isOpen={isAddModalOpen}
         isLoading={isAddingStudent}

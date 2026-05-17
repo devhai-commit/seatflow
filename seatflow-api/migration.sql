@@ -24,3 +24,20 @@ INNER JOIN seating_assignments sa2
 -- 5. Thêm unique constraint: mỗi học sinh tối đa 1 chỗ ngồi
 ALTER TABLE seating_assignments
   ADD UNIQUE KEY uq_student (student_id);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Migration: student_code, class_name, critical violation
+-- Chạy sau khi đã chạy migration ở trên
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- 6. Thêm mã học sinh (có thể nhập/sửa tự do)
+ALTER TABLE students
+  ADD COLUMN student_code VARCHAR(50) DEFAULT NULL;
+
+-- 7. Thêm tên lớp vào cài đặt chung (có thể chỉnh sửa, không hardcode)
+ALTER TABLE app_settings
+  ADD COLUMN class_name VARCHAR(100) DEFAULT NULL;
+
+-- 8. Mở rộng ENUM type của behavior_records để hỗ trợ lỗi đặc biệt (quay cóp, đánh nhau)
+ALTER TABLE behavior_records
+  MODIFY COLUMN type ENUM('bonus', 'penalty', 'info', 'critical') NOT NULL;
