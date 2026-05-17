@@ -253,6 +253,34 @@ export default function App() {
     }
   }, []);
 
+  // Refresh students list from server (for add/delete operations)
+  const handleRefreshStudents = useCallback(async () => {
+    try {
+      const studentsData = await api.getStudents();
+      const mapped: Student[] = studentsData.map((s: StudentRow) => ({
+        id: s.id,
+        fullName: s.full_name,
+        shortName: s.short_name || '',
+        currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
+          ? Number(s.current_seat_assigned_timestamp) : null,
+        parentPhone: s.parent_phone ?? undefined,
+        address: s.address ?? undefined,
+        weight: s.weight ?? undefined,
+        height: s.height ?? undefined,
+        isNearsighted: s.is_nearsighted ?? undefined,
+        isSpecialNeeds: s.is_special_needs ?? undefined,
+        avatarUrl: s.avatar_url ?? undefined,
+        behaviorRecords: (s.behavior_records || []).map(br => ({
+          ...br,
+          timestamp: Number(br.timestamp),
+        })) as Student['behaviorRecords'],
+      }));
+      setStudents(calculateShortNames(mapped));
+    } catch (err) {
+      console.error('Lỗi tải danh sách học sinh:', err);
+    }
+  }, []);
+
   const saveToHistory = useCallback(async (chart: SeatingChart, note: string) => {
     const snapshot = chart.map(row => row.map(table => table.map(s => s.id)));
     const created_at = Date.now();
@@ -660,6 +688,7 @@ export default function App() {
             students={students}
             onUpdateStudent={handleUpdateSingleStudent}
             onSyncStudents={handleSyncStudents}
+            onRefreshStudents={handleRefreshStudents}
           />
         )}
 

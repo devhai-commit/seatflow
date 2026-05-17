@@ -2,11 +2,13 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import type { Student } from '../types';
 import { api } from '../apiClient';
+import AddStudentModal from './AddStudentModal';
 
 interface StudentManagerPageProps {
   students: Student[];
   onUpdateStudent: (updated: Student) => void;
   onSyncStudents: (names: string[]) => Promise<void>;
+  onRefreshStudents?: () => Promise<void>;
 }
 
 // ─── Preset violations / bonuses ──────────────────────────────────────────────
@@ -111,12 +113,14 @@ const avatarColors = [
 ];
 
 // ─── Component ─────────────────────────────────────────────────────────────────
-export default function StudentManagerPage({ students, onUpdateStudent, onSyncStudents }: StudentManagerPageProps) {
+export default function StudentManagerPage({ students, onUpdateStudent, onSyncStudents, onRefreshStudents }: StudentManagerPageProps) {
   const [selectedStudentId, setSelectedStudentId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<TabId>('info');
   const [search, setSearch] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // Behavior form
@@ -291,6 +295,46 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
     }
   };
 
+  const handleAddStudent = async (fullName: string) => {
+    setIsAddingStudent(true);
+    try {
+      await api.addStudent(fullName);
+      setIsAddModalOpen(false);
+      // Refresh student list to show the new student
+      if (onRefreshStudents) {
+        await onRefreshStudents();
+      }
+      alert('Thêm học sinh thành công!');
+    } catch (err) {
+      console.error('Lỗi thêm học sinh:', err);
+      throw err;
+    } finally {
+      setIsAddingStudent(false);
+    }
+  };
+
+  const handleDeleteStudent = async () => {
+    if (!selected) return;
+    if (!confirm(`Bạn có chắc chắn muốn xóa học sinh "${selected.fullName}"? Hành động này không thể hoàn tác.`)) {
+      return;
+    }
+    setIsProcessing(true);
+    try {
+      await api.deleteStudent(selected.id);
+      setSelectedStudentId('');
+      // Refresh student list after deletion
+      if (onRefreshStudents) {
+        await onRefreshStudents();
+      }
+      alert('Xóa học sinh thành công!');
+    } catch (err) {
+      console.error('Lỗi xóa học sinh:', err);
+      alert('Không thể xóa học sinh.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const excelInputRef = useRef<HTMLInputElement>(null);
 
   const handleExportExcel = () => {
@@ -377,6 +421,14 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
             <span className="text-sm text-[#464555]">Tổng số: {students.length} học sinh</span>
             <div className="flex gap-1">
               <button
+                onClick={() => setIsAddModalOpen(true)}
+                title="Thêm học sinh mới"
+                className="flex items-center gap-1 px-2 py-1.5 text-xs font-medium text-white bg-[#3525cd] hover:bg-[#2b1fa8] rounded-lg transition-colors"
+              >
+                <span className="material-symbols-outlined text-[15px]">add</span>
+                Thêm
+              </button>
+              <button
                 onClick={handleExportExcel}
                 disabled={students.length === 0}
                 title="Xuất danh sách ra Excel"
@@ -450,7 +502,7 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
         {selected ? (
           <div className="max-w-5xl mx-auto p-8 space-y-4">
             {/* Header card */}
-            <div className="bg-white border border-[#c7c4d8] rounded-xl p-6 shadow-sm flex flex-col md:flex-row items-center gap-8">
+            <div className="relative bg-white border border-[#c7c4d8] rounded-xl p-6 shadow-sm flex flex-col md:flex-row items-center gap-8">
               {/* Avatar with upload overlay */}
               <div className="relative flex-shrink-0 group">
                 <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white shadow-md">
@@ -518,6 +570,17 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
                       <span className="material-symbols-outlined text-[14px]">straighten</span> Chiều cao &lt;135cm
                     </span>
                   )}
+                </div>
+                <div className="md:absolute md:right-6 md:top-8 mt-4 md:mt-0 flex gap-2">
+                  <button
+                    onClick={handleDeleteStudent}
+                    disabled={isProcessing}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors disabled:opacity-50"
+                    title="Xóa học sinh"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">delete</span>
+                    Xóa
+                  </button>
                 </div>
               </div>
             </div>
@@ -916,6 +979,14 @@ export default function StudentManagerPage({ students, onUpdateStudent, onSyncSt
           </div>
         )}
       </section>
+
+      {/* Add Student Modal */}
+      <AddStudentModal
+        isOpen={isAddModalOpen}
+        isLoading={isAddingStudent}
+        onClose={() => setIsAddModalOpen(false)}
+        onSubmit={handleAddStudent}
+      />
     </div>
   );
 }

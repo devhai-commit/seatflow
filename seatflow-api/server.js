@@ -294,6 +294,28 @@ app.put('/api/students/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/students/:id
+app.delete('/api/students/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`[DELETE /api/students/:id] Deleting student with id: ${id}`);
+    // Delete avatar file if exists
+    const [rows] = await pool.query('SELECT avatar_url FROM students WHERE id = ?', [id]);
+    const avatarUrl = rows[0]?.avatar_url;
+    if (avatarUrl) {
+      const filePath = path.join(__dirname, avatarUrl);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    // Delete student (cascades to behavior_records and seating_assignments)
+    await pool.query('DELETE FROM students WHERE id = ?', [id]);
+    console.log(`[DELETE /api/students/:id] Successfully deleted student with id: ${id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`[DELETE /api/students/:id] Error deleting student:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/students/:studentId/avatar — upload ảnh đại diện
 app.post('/api/students/:studentId/avatar', (req, res, next) => {
   req.params.studentId = req.params.studentId; // ensure param accessible in multer filename
@@ -381,6 +403,12 @@ app.post('/api/seating-history', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// 404 handler for debugging
+app.use((req, res) => {
+  console.error(`[404] ${req.method} ${req.path} - Route not found`);
+  res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
 });
 
 const PORT = process.env.PORT || 3001;

@@ -55,6 +55,17 @@ export const api = {
       body: JSON.stringify({ names }),
     }),
 
+  addStudent: (fullName: string) =>
+    request<StudentRow>('/api/students', {
+      method: 'POST',
+      body: JSON.stringify({ full_name: fullName }),
+    }),
+
+  deleteStudent: (id: string) =>
+    request<{ success: boolean }>(`/api/students/${id}`, {
+      method: 'DELETE',
+    }),
+
   updateStudent: (id: string, data: Record<string, unknown>) =>
     request<{ success: boolean }>(`/api/students/${id}`, {
       method: 'PUT',
