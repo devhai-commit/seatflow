@@ -4,6 +4,8 @@ import type { Student } from '../types';
 import { api } from '../apiClient';
 import AddStudentModal from './AddStudentModal';
 
+const API_BASE = (import.meta.env.VITE_API_URL as string) || 'http://localhost:3001';
+
 interface StudentManagerPageProps {
   students: Student[];
   onUpdateStudent: (updated: Student) => void;
@@ -636,7 +638,7 @@ export default function StudentManagerPage({
                 ) : (
                   <div className={`w-10 h-10 rounded-full overflow-hidden flex-shrink-0`}>
                     {student.avatarUrl ? (
-                      <img src={`http://localhost:3001${student.avatarUrl}`} alt="" className="w-full h-full object-cover" />
+                      <img src={`${API_BASE}${student.avatarUrl}`} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className={`w-full h-full flex items-center justify-center font-bold text-sm ${isActive ? 'bg-[#3525cd] text-white' : avatarColors[idx % avatarColors.length]}`}>
                         {getInitials(student.fullName)}
@@ -676,7 +678,7 @@ export default function StudentManagerPage({
               <div className="relative flex-shrink-0 group">
                 <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white shadow-md">
                   {selected.avatarUrl ? (
-                    <img src={`http://localhost:3001${selected.avatarUrl}`} alt={selected.fullName} className="w-full h-full object-cover" />
+                    <img src={`${API_BASE}${selected.avatarUrl}`} alt={selected.fullName} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full bg-[#e2dfff] flex items-center justify-center text-3xl font-bold text-[#3525cd]">
                       {getInitials(selected.fullName)}

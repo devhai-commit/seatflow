@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { Student, SeatingChart, ViewMode, GroupSettings, Group, ArrangementMode, SeatingHistoryEntry } from '../types';
 
+const API_BASE = (import.meta.env.VITE_API_URL as string) || 'http://localhost:3001';
+
 const GROUP_COLORS = [
   { border: '#4f46e5', bg: '#e0e7ff', text: '#3730a3', label: 'Tổ 1' },
   { border: '#16a34a', bg: '#dcfce7', text: '#15803d', label: 'Tổ 2' },
@@ -87,7 +89,7 @@ function DraggableStudent({
       <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 bg-white/60">
         {student.avatarUrl ? (
           <img
-            src={`http://localhost:3001${student.avatarUrl}`}
+            src={`${API_BASE}${student.avatarUrl}`}
             alt=""
             className="w-full h-full object-cover"
             draggable={false}
