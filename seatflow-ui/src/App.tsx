@@ -3,7 +3,7 @@ import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, DragOv
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import type {
   Student, SeatingChart, ViewMode, GroupSettings, Group,
-  ArrangementMode, Row, Table, ActiveTab, SeatingHistoryEntry,
+  ArrangementMode, Row, Table, ActiveTab, SeatingHistoryEntry, Classroom,
 } from './types';
 import LoginPage from './components/LoginPage';
 import NavBar from './components/NavBar';
@@ -11,10 +11,9 @@ import SeatingChartPage from './components/SeatingChartPage';
 import PriorityStudentsPage from './components/PriorityStudentsPage';
 import StudentManagerPage from './components/StudentManagerPage';
 import HelpModal from './components/HelpModal';
-import { api } from './apiClient';
+import { api, setClassroomId } from './apiClient';
 import type { StudentRow } from './apiClient';
 
-// Fisher-Yates shuffle
 const shuffleArray = <T,>(array: T[]): T[] => {
   const newArray = [...array];
   for (let i = newArray.length - 1; i > 0; i--) {
@@ -46,6 +45,28 @@ const calculateShortNames = (students: Student[]): Student[] => {
   });
 };
 
+function mapStudentRow(s: StudentRow): Student {
+  return {
+    id: s.id,
+    fullName: s.full_name,
+    shortName: s.short_name || '',
+    studentCode: s.student_code ?? undefined,
+    currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
+      ? Number(s.current_seat_assigned_timestamp) : null,
+    parentPhone: s.parent_phone ?? undefined,
+    address: s.address ?? undefined,
+    weight: s.weight ?? undefined,
+    height: s.height ?? undefined,
+    isNearsighted: s.is_nearsighted ?? undefined,
+    isSpecialNeeds: s.is_special_needs ?? undefined,
+    avatarUrl: s.avatar_url ?? undefined,
+    behaviorRecords: (s.behavior_records || []).map(br => ({
+      ...br,
+      timestamp: Number(br.timestamp),
+    })) as Student['behaviorRecords'],
+  };
+}
+
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     return localStorage.getItem('seatflow_isLoggedIn') === 'true';
@@ -53,6 +74,12 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chart');
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Classrooms
+  const [classrooms, setClassrooms] = useState<Classroom[]>([]);
+  const [selectedClassroomId, setSelectedClassroomId] = useState<number>(() => {
+    return parseInt(localStorage.getItem('seatflow_classroomId') || '1');
+  });
 
   // Settings & Data
   const [rows, setRows] = useState(4);
@@ -109,12 +136,42 @@ export default function App() {
     }
   }, []);
 
-  // --- Initial data fetch ---
+  // --- Load classrooms ---
   useEffect(() => {
     if (!isLoggedIn) return;
+    api.getClassrooms().then(rows => {
+      const mapped: Classroom[] = rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        grade: r.grade,
+        school_year: r.school_year,
+        created_at: r.created_at,
+      }));
+      setClassrooms(mapped);
+      // If saved classroom no longer exists, fall back to first
+      if (mapped.length > 0 && !mapped.find(c => c.id === selectedClassroomId)) {
+        setSelectedClassroomId(mapped[0].id);
+      }
+    }).catch(err => console.error('Error loading classrooms:', err));
+  }, [isLoggedIn]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --- Load classroom data when selection changes ---
+  useEffect(() => {
+    if (!isLoggedIn || !selectedClassroomId) return;
+
+    setClassroomId(selectedClassroomId);
+    localStorage.setItem('seatflow_classroomId', String(selectedClassroomId));
 
     const fetchData = async () => {
       setIsLoading(true);
+      // Reset current data before loading new classroom
+      setSeatingChart([]);
+      setStudents([]);
+      setGroups([]);
+      setGroupLeaders(new Map());
+      setClassName('');
+      setSeatingHistory([]);
+
       try {
         const settings = await api.getSettings();
         if (settings && Object.keys(settings).length > 0) {
@@ -146,26 +203,7 @@ export default function App() {
 
         const studentsData = await api.getStudents();
         if (studentsData) {
-          const mapped: Student[] = studentsData.map((s: StudentRow) => ({
-            id: s.id,
-            fullName: s.full_name,
-            shortName: s.short_name || '',
-            studentCode: s.student_code ?? undefined,
-            currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
-              ? Number(s.current_seat_assigned_timestamp) : null,
-            parentPhone: s.parent_phone ?? undefined,
-            address: s.address ?? undefined,
-            weight: s.weight ?? undefined,
-            height: s.height ?? undefined,
-            isNearsighted: s.is_nearsighted ?? undefined,
-            isSpecialNeeds: s.is_special_needs ?? undefined,
-            avatarUrl: s.avatar_url ?? undefined,
-            behaviorRecords: (s.behavior_records || []).map(br => ({
-              ...br,
-              timestamp: Number(br.timestamp),
-            })) as Student['behaviorRecords'],
-          }));
-          setStudents(calculateShortNames(mapped));
+          setStudents(calculateShortNames(studentsData.map(mapStudentRow)));
         }
       } catch (error) {
         console.error('Unexpected error loading data:', error);
@@ -175,7 +213,7 @@ export default function App() {
     };
 
     fetchData();
-  }, [isLoggedIn]);
+  }, [isLoggedIn, selectedClassroomId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Auto-save settings ---
   useEffect(() => {
@@ -186,7 +224,57 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [rows, cols, seatsPerTable, groupSettings, isLoading, saveAppSettings, isLoggedIn]);
 
-  // --- Rows/cols auto-adjust to keep capacity ≥ students.length ---
+  // --- Classroom management ---
+  const handleSelectClassroom = useCallback((id: number) => {
+    setSelectedClassroomId(id);
+  }, []);
+
+  const handleCreateClassroom = useCallback(async (name: string, grade?: string, schoolYear?: string) => {
+    try {
+      const row = await api.createClassroom({ name, grade, school_year: schoolYear });
+      const newClassroom: Classroom = {
+        id: row.id,
+        name: row.name,
+        grade: row.grade,
+        school_year: row.school_year,
+        created_at: row.created_at,
+      };
+      setClassrooms(prev => [...prev, newClassroom]);
+      setSelectedClassroomId(row.id);
+    } catch (err) {
+      console.error('Error creating classroom:', err);
+      alert('Không thể tạo lớp học mới.');
+    }
+  }, []);
+
+  const handleUpdateClassroom = useCallback(async (id: number, name: string, grade?: string, schoolYear?: string) => {
+    try {
+      await api.updateClassroom(id, { name, grade, school_year: schoolYear });
+      setClassrooms(prev => prev.map(c =>
+        c.id === id ? { ...c, name, grade: grade ?? null, school_year: schoolYear ?? null } : c
+      ));
+      if (id === selectedClassroomId) setClassName(name);
+    } catch (err) {
+      console.error('Error updating classroom:', err);
+      alert('Không thể cập nhật lớp học.');
+    }
+  }, [selectedClassroomId]);
+
+  const handleDeleteClassroom = useCallback(async (id: number) => {
+    try {
+      await api.deleteClassroom(id);
+      const remaining = classrooms.filter(c => c.id !== id);
+      setClassrooms(remaining);
+      if (id === selectedClassroomId && remaining.length > 0) {
+        setSelectedClassroomId(remaining[0].id);
+      }
+    } catch (err) {
+      console.error('Error deleting classroom:', err);
+      alert('Không thể xóa lớp học.');
+    }
+  }, [classrooms, selectedClassroomId]);
+
+  // --- Rows/cols auto-adjust ---
   const handleRowsChange = useCallback((newRows: number) => {
     if (newRows < 1) return;
     const target = students.length > 0 ? students.length : rows * cols * seatsPerTable;
@@ -202,7 +290,6 @@ export default function App() {
     setCols(newCols);
     setRows(newRows);
   }, [students.length, rows, cols, seatsPerTable]);
-
 
   // --- Single student update ---
   const handleUpdateSingleStudent = useCallback(async (updatedStudent: Student) => {
@@ -230,29 +317,10 @@ export default function App() {
     }
   }, []);
 
-  // Sync students from an imported name list (Excel / text)
   const handleSyncStudents = useCallback(async (names: string[]) => {
     try {
       const studentsData = await api.syncStudents(names);
-      const mapped: Student[] = studentsData.map((s: StudentRow) => ({
-        id: s.id,
-        fullName: s.full_name,
-        shortName: s.short_name || '',
-        currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
-          ? Number(s.current_seat_assigned_timestamp) : null,
-        parentPhone: s.parent_phone ?? undefined,
-        address: s.address ?? undefined,
-        weight: s.weight ?? undefined,
-        height: s.height ?? undefined,
-        isNearsighted: s.is_nearsighted ?? undefined,
-        isSpecialNeeds: s.is_special_needs ?? undefined,
-        avatarUrl: s.avatar_url ?? undefined,
-        behaviorRecords: (s.behavior_records || []).map(br => ({
-          ...br,
-          timestamp: Number(br.timestamp),
-        })) as Student['behaviorRecords'],
-      }));
-      setStudents(calculateShortNames(mapped));
+      setStudents(calculateShortNames(studentsData.map(mapStudentRow)));
     } catch (err) {
       console.error('Lỗi đồng bộ danh sách:', err);
       throw err;
@@ -272,31 +340,14 @@ export default function App() {
   const handleClassNameChange = useCallback(async (name: string) => {
     setClassName(name);
     await api.saveSettings({ class_name: name });
-  }, []);
+    // Sync local classroom list
+    setClassrooms(prev => prev.map(c => c.id === selectedClassroomId ? { ...c, name } : c));
+  }, [selectedClassroomId]);
 
-  // Refresh students list from server (for add/delete operations)
   const handleRefreshStudents = useCallback(async () => {
     try {
       const studentsData = await api.getStudents();
-      const mapped: Student[] = studentsData.map((s: StudentRow) => ({
-        id: s.id,
-        fullName: s.full_name,
-        shortName: s.short_name || '',
-        currentSeatAssignedTimestamp: s.current_seat_assigned_timestamp !== null
-          ? Number(s.current_seat_assigned_timestamp) : null,
-        parentPhone: s.parent_phone ?? undefined,
-        address: s.address ?? undefined,
-        weight: s.weight ?? undefined,
-        height: s.height ?? undefined,
-        isNearsighted: s.is_nearsighted ?? undefined,
-        isSpecialNeeds: s.is_special_needs ?? undefined,
-        avatarUrl: s.avatar_url ?? undefined,
-        behaviorRecords: (s.behavior_records || []).map(br => ({
-          ...br,
-          timestamp: Number(br.timestamp),
-        })) as Student['behaviorRecords'],
-      }));
-      setStudents(calculateShortNames(mapped));
+      setStudents(calculateShortNames(studentsData.map(mapStudentRow)));
     } catch (err) {
       console.error('Lỗi tải danh sách học sinh:', err);
     }
@@ -406,8 +457,9 @@ export default function App() {
 
     setGroups(newGroups);
     setGroupLeaders(new Map());
-    saveAppSettings({ groups_data: newGroups, group_leaders: {} });
-  }, [seatingChart, rows, cols, groupSettings, arrangementMode, saveAppSettings]);
+    // Save groups_data, group_leaders, AND group_settings together
+    saveAppSettings({ groups_data: newGroups, group_leaders: {}, group_settings: groupSettings });
+  }, [seatingChart, cols, groupSettings, arrangementMode, saveAppSettings]);
 
   // --- Initial arrangement ---
   const handleInitialArrangement = useCallback(async () => {
@@ -501,7 +553,6 @@ export default function App() {
         })
       )
     );
-    // Include students not yet placed in the chart
     students.forEach(s => {
       if (!placedIds.has(s.id)) currentSeated.push(s);
     });
@@ -674,7 +725,18 @@ export default function App() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#f9f9ff' }}>
-      <NavBar activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} onHelpClick={() => setIsHelpOpen(true)} />
+      <NavBar
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onLogout={handleLogout}
+        onHelpClick={() => setIsHelpOpen(true)}
+        classrooms={classrooms}
+        selectedClassroomId={selectedClassroomId}
+        onSelectClassroom={handleSelectClassroom}
+        onCreateClassroom={handleCreateClassroom}
+        onUpdateClassroom={handleUpdateClassroom}
+        onDeleteClassroom={handleDeleteClassroom}
+      />
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         {activeTab === 'chart' && (

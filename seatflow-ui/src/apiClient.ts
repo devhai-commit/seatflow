@@ -1,8 +1,17 @@
 const API_BASE = (import.meta.env.VITE_API_URL as string) || 'http://localhost:3001';
 
+let _classroomId: number = 1;
+
+export function setClassroomId(id: number) {
+  _classroomId = id;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Classroom-ID': String(_classroomId),
+    },
     ...options,
   });
   if (!res.ok) {
@@ -26,7 +35,7 @@ export interface StudentRow {
   full_name: string;
   short_name: string | null;
   student_code: string | null;
-  current_seat_assigned_timestamp: number | null; // from LEFT JOIN seating_assignments.assigned_at
+  current_seat_assigned_timestamp: number | null;
   parent_phone: string | null;
   address: string | null;
   weight: string | null;
@@ -37,7 +46,37 @@ export interface StudentRow {
   behavior_records: BehaviorRow[];
 }
 
+export interface ClassroomRow {
+  id: number;
+  name: string;
+  grade: string | null;
+  school_year: string | null;
+  created_at: number;
+}
+
 export const api = {
+  // Classrooms
+  getClassrooms: () =>
+    request<ClassroomRow[]>('/api/classrooms'),
+
+  createClassroom: (data: { name: string; grade?: string; school_year?: string }) =>
+    request<ClassroomRow>('/api/classrooms', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  updateClassroom: (id: number, data: { name: string; grade?: string; school_year?: string }) =>
+    request<{ success: boolean }>(`/api/classrooms/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  deleteClassroom: (id: number) =>
+    request<{ success: boolean }>(`/api/classrooms/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Settings
   getSettings: () =>
     request<Record<string, unknown>>('/api/settings'),
 
@@ -47,6 +86,7 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  // Students
   getStudents: () =>
     request<StudentRow[]>('/api/students'),
 
@@ -99,6 +139,7 @@ export const api = {
     const res = await fetch(`${API_BASE}/api/students/${studentId}/avatar`, {
       method: 'POST',
       body: formData,
+      headers: { 'X-Classroom-ID': String(_classroomId) },
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json() as Promise<{ avatarUrl: string }>;

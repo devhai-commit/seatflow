@@ -35,6 +35,14 @@ export interface SeatingHistoryEntry {
   note?: string;
 }
 
+export interface Classroom {
+  id: number;
+  name: string;
+  grade: string | null;
+  school_year: string | null;
+  created_at: number;
+}
+
 export type ViewMode = '2d' | '3d';
 export type GroupArrangement = 'horizontal' | 'vertical' | 'cluster';
 export type ActiveTab = 'chart' | 'priority' | 'manager';

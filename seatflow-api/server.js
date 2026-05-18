@@ -16,11 +16,9 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Serve uploaded avatars as static files
 const uploadsDir = path.join(__dirname, 'uploads');
 app.use('/uploads', express.static(uploadsDir));
 
-// Multer config: store avatars in uploads/avatars/, filename = studentId + ext
 const avatarStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, path.join(uploadsDir, 'avatars')),
   filename: (req, file, cb) => {
@@ -30,7 +28,7 @@ const avatarStorage = multer.diskStorage({
 });
 const uploadAvatar = multer({
   storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (/^image\/(jpeg|jpg|png|webp|gif)$/.test(file.mimetype)) cb(null, true);
     else cb(new Error('Chỉ chấp nhận file ảnh (jpg/png/webp/gif)'));
@@ -53,9 +51,12 @@ const pool = mysql.createPool({
 
 const JSON_FIELDS = ['group_settings', 'groups_data', 'group_leaders'];
 
-// Sync seating_assignments from chart. Preserves each student's assigned_at timestamp.
-async function syncSeatingAssignments(chart) {
-  await pool.query('DELETE FROM seating_assignments');
+function getClassroomId(req) {
+  return parseInt(req.headers['x-classroom-id']) || 1;
+}
+
+async function syncSeatingAssignments(chart, classroomId = 1) {
+  await pool.query('DELETE FROM seating_assignments WHERE classroom_id = ?', [classroomId]);
   const now = Date.now();
   const insertRows = [];
   chart.forEach((row, r) =>
@@ -63,14 +64,14 @@ async function syncSeatingAssignments(chart) {
       table.forEach((student, s) => {
         if (student?.id) {
           const ts = student.currentSeatAssignedTimestamp || now;
-          insertRows.push([student.id, r, c, s, ts]);
+          insertRows.push([student.id, r, c, s, ts, classroomId]);
         }
       })
     )
   );
   if (insertRows.length > 0) {
     await pool.query(
-      'INSERT INTO seating_assignments (student_id, row_index, col_index, seat_index, assigned_at) VALUES ?',
+      'INSERT INTO seating_assignments (student_id, row_index, col_index, seat_index, assigned_at, classroom_id) VALUES ?',
       [insertRows]
     );
   }
@@ -87,10 +88,7 @@ function parseRow(row) {
   return result;
 }
 
-// Build seating chart from seating_assignments joined with students.
-// Returns [] when no assignments exist.
-// Chart dimensions: max(minRows, maxAssignedRow+1) x max(cols, maxAssignedCol+1)
-async function buildChartFromAssignments(minRows, cols) {
+async function buildChartFromAssignments(minRows, cols, classroomId = 1) {
   const [assignments] = await pool.query(`
     SELECT sa.row_index, sa.col_index, sa.seat_index, sa.assigned_at,
            s.id AS student_id, s.full_name, s.short_name,
@@ -98,12 +96,16 @@ async function buildChartFromAssignments(minRows, cols) {
            s.is_nearsighted, s.is_special_needs, s.avatar_url
     FROM seating_assignments sa
     JOIN students s ON sa.student_id = s.id
+    WHERE sa.classroom_id = ?
     ORDER BY sa.row_index, sa.col_index, sa.seat_index
-  `);
+  `, [classroomId]);
 
   if (assignments.length === 0) return [];
 
-  const [behaviors] = await pool.query('SELECT * FROM behavior_records');
+  const [behaviors] = await pool.query(
+    'SELECT * FROM behavior_records WHERE student_id IN (SELECT id FROM students WHERE classroom_id = ?)',
+    [classroomId]
+  );
   const behaviorMap = new Map();
   behaviors.forEach(b => {
     if (!behaviorMap.has(b.student_id)) behaviorMap.set(b.student_id, []);
@@ -145,42 +147,119 @@ async function buildChartFromAssignments(minRows, cols) {
   return chart;
 }
 
-// GET /api/settings
-app.get('/api/settings', async (req, res) => {
+// ── Classroom CRUD ────────────────────────────────────────────────────────────
+
+app.get('/api/classrooms', async (req, res) => {
   try {
-    const [settingsRows] = await pool.query('SELECT * FROM app_settings WHERE id = 1');
+    const [rows] = await pool.query('SELECT * FROM classrooms ORDER BY created_at');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/classrooms', async (req, res) => {
+  try {
+    const { name, grade, school_year } = req.body;
+    const created_at = Date.now();
+    const [result] = await pool.query(
+      'INSERT INTO classrooms (name, grade, school_year, created_at) VALUES (?, ?, ?, ?)',
+      [name || 'Lớp mới', grade || null, school_year || null, created_at]
+    );
+    const classroomId = result.insertId;
+    await pool.query(
+      'INSERT INTO app_settings (id, min_rows, cols, seats_per_table, arrangement_mode) VALUES (?, 4, 5, 2, "automatic")',
+      [classroomId]
+    );
+    res.json({ id: classroomId, name: name || 'Lớp mới', grade: grade || null, school_year: school_year || null, created_at });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/classrooms/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, grade, school_year } = req.body;
+    await pool.query(
+      'UPDATE classrooms SET name = ?, grade = ?, school_year = ? WHERE id = ?',
+      [name, grade || null, school_year || null, id]
+    );
+    // Sync class_name in app_settings
+    await pool.query('UPDATE app_settings SET class_name = ? WHERE id = ?', [name, id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/classrooms/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    // Delete avatars for students in this classroom
+    const [studentRows] = await pool.query('SELECT id, avatar_url FROM students WHERE classroom_id = ?', [id]);
+    studentRows.forEach(r => {
+      if (r.avatar_url) {
+        const filePath = path.join(__dirname, r.avatar_url);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      }
+    });
+    await pool.query('DELETE FROM students WHERE classroom_id = ?', [id]);
+    await pool.query('DELETE FROM seating_history WHERE classroom_id = ?', [id]);
+    await pool.query('DELETE FROM app_settings WHERE id = ?', [id]);
+    await pool.query('DELETE FROM classrooms WHERE id = ?', [id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+app.get('/api/settings', async (req, res) => {
+  const classroomId = getClassroomId(req);
+  try {
+    const [settingsRows] = await pool.query('SELECT * FROM app_settings WHERE id = ?', [classroomId]);
     const settings = parseRow(settingsRows[0]) || {};
+
+    const [classroomRows] = await pool.query('SELECT name FROM classrooms WHERE id = ?', [classroomId]);
+    const classroomName = classroomRows[0]?.name || '';
 
     const minRows = settings.min_rows || 4;
     const cols = settings.cols || 5;
 
-    const chart = await buildChartFromAssignments(minRows, cols);
+    const chart = await buildChartFromAssignments(minRows, cols, classroomId);
     const actualRows = chart.length > 0 ? chart.length : minRows;
 
     res.json({
       ...settings,
       rows: actualRows,
       seating_chart: chart,
+      class_name: settings.class_name || classroomName,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/settings
 app.post('/api/settings', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const data = { ...req.body };
+    delete data.classroom_id;
 
-    // Translate rows → min_rows (frontend uses `rows`, DB stores `min_rows`)
     if (data.rows !== undefined) {
       data.min_rows = data.rows;
       delete data.rows;
     }
 
-    // Strip seating_chart — stored in seating_assignments, not app_settings
     const chart = data.seating_chart;
     delete data.seating_chart;
+
+    // Sync classroom name when class_name is updated
+    if (data.class_name !== undefined) {
+      await pool.query('UPDATE classrooms SET name = ? WHERE id = ?', [data.class_name, classroomId]);
+    }
 
     JSON_FIELDS.forEach(f => {
       if (data[f] !== undefined && typeof data[f] !== 'string') {
@@ -189,13 +268,13 @@ app.post('/api/settings', async (req, res) => {
     });
 
     if (Object.keys(data).length > 0) {
-      const [existing] = await pool.query('SELECT id FROM app_settings WHERE id = 1');
+      const [existing] = await pool.query('SELECT id FROM app_settings WHERE id = ?', [classroomId]);
       if (existing.length > 0) {
         const keys = Object.keys(data);
         const sets = keys.map(k => `\`${k}\` = ?`).join(', ');
-        await pool.query(`UPDATE app_settings SET ${sets} WHERE id = 1`, Object.values(data));
+        await pool.query(`UPDATE app_settings SET ${sets} WHERE id = ?`, [...Object.values(data), classroomId]);
       } else {
-        data.id = 1;
+        data.id = classroomId;
         const keys = Object.keys(data);
         const colNames = keys.map(k => `\`${k}\``).join(', ');
         const placeholders = keys.map(() => '?').join(', ');
@@ -208,7 +287,7 @@ app.post('/api/settings', async (req, res) => {
 
     if (chart !== undefined) {
       const chartData = typeof chart === 'string' ? JSON.parse(chart) : chart;
-      await syncSeatingAssignments(chartData);
+      await syncSeatingAssignments(chartData, classroomId);
     }
 
     res.json({ success: true });
@@ -217,16 +296,22 @@ app.post('/api/settings', async (req, res) => {
   }
 });
 
-// GET /api/students
+// ── Students ──────────────────────────────────────────────────────────────────
+
 app.get('/api/students', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const [students] = await pool.query(`
       SELECT s.*, sa.assigned_at AS current_seat_assigned_timestamp
       FROM students s
-      LEFT JOIN seating_assignments sa ON s.id = sa.student_id
+      LEFT JOIN seating_assignments sa ON s.id = sa.student_id AND sa.classroom_id = ?
+      WHERE s.classroom_id = ?
       ORDER BY SUBSTRING_INDEX(s.full_name, ' ', -1), s.full_name
-    `);
-    const [behaviors] = await pool.query('SELECT * FROM behavior_records');
+    `, [classroomId, classroomId]);
+    const [behaviors] = await pool.query(
+      'SELECT * FROM behavior_records WHERE student_id IN (SELECT id FROM students WHERE classroom_id = ?)',
+      [classroomId]
+    );
     const result = students.map(s => ({
       ...s,
       behavior_records: behaviors.filter(b => b.student_id === s.id),
@@ -237,26 +322,30 @@ app.get('/api/students', async (req, res) => {
   }
 });
 
-// POST /api/students/sync — insert new names, return all students
 app.post('/api/students/sync', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const { names } = req.body;
-    const [existing] = await pool.query('SELECT full_name FROM students');
+    const [existing] = await pool.query('SELECT full_name FROM students WHERE classroom_id = ?', [classroomId]);
     const existingNames = new Set(existing.map(s => s.full_name));
 
     const newStudents = names.filter(n => !existingNames.has(n));
     if (newStudents.length > 0) {
-      const inserts = newStudents.map(n => [uuidv4(), n]);
-      await pool.query('INSERT INTO students (id, full_name) VALUES ?', [inserts]);
+      const inserts = newStudents.map(n => [uuidv4(), classroomId, n]);
+      await pool.query('INSERT INTO students (id, classroom_id, full_name) VALUES ?', [inserts]);
     }
 
     const [students] = await pool.query(`
       SELECT s.*, sa.assigned_at AS current_seat_assigned_timestamp
       FROM students s
-      LEFT JOIN seating_assignments sa ON s.id = sa.student_id
+      LEFT JOIN seating_assignments sa ON s.id = sa.student_id AND sa.classroom_id = ?
+      WHERE s.classroom_id = ?
       ORDER BY SUBSTRING_INDEX(s.full_name, ' ', -1), s.full_name
-    `);
-    const [behaviors] = await pool.query('SELECT * FROM behavior_records');
+    `, [classroomId, classroomId]);
+    const [behaviors] = await pool.query(
+      'SELECT * FROM behavior_records WHERE student_id IN (SELECT id FROM students WHERE classroom_id = ?)',
+      [classroomId]
+    );
     const result = students.map(s => ({
       ...s,
       behavior_records: behaviors.filter(b => b.student_id === s.id),
@@ -267,14 +356,12 @@ app.post('/api/students/sync', async (req, res) => {
   }
 });
 
-// DELETE /api/students/batch — xóa nhiều học sinh cùng lúc
 app.delete('/api/students/batch', async (req, res) => {
   try {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'Cần truyền mảng ids không rỗng' });
     }
-    // Delete avatar files first
     const [rows] = await pool.query(
       `SELECT id, avatar_url FROM students WHERE id IN (${ids.map(() => '?').join(',')})`,
       ids
@@ -295,12 +382,12 @@ app.delete('/api/students/batch', async (req, res) => {
   }
 });
 
-// POST /api/students
 app.post('/api/students', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const { full_name } = req.body;
     const id = uuidv4();
-    await pool.query('INSERT INTO students (id, full_name) VALUES (?, ?)', [id, full_name]);
+    await pool.query('INSERT INTO students (id, classroom_id, full_name) VALUES (?, ?, ?)', [id, classroomId, full_name]);
     const [rows] = await pool.query('SELECT * FROM students WHERE id = ?', [id]);
     res.json(rows[0]);
   } catch (err) {
@@ -308,7 +395,6 @@ app.post('/api/students', async (req, res) => {
   }
 });
 
-// PUT /api/students/:id
 app.put('/api/students/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -322,31 +408,24 @@ app.put('/api/students/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/students/:id
 app.delete('/api/students/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`[DELETE /api/students/:id] Deleting student with id: ${id}`);
-    // Delete avatar file if exists
     const [rows] = await pool.query('SELECT avatar_url FROM students WHERE id = ?', [id]);
     const avatarUrl = rows[0]?.avatar_url;
     if (avatarUrl) {
       const filePath = path.join(__dirname, avatarUrl);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
-    // Delete student (cascades to behavior_records and seating_assignments)
     await pool.query('DELETE FROM students WHERE id = ?', [id]);
-    console.log(`[DELETE /api/students/:id] Successfully deleted student with id: ${id}`);
     res.json({ success: true });
   } catch (err) {
-    console.error(`[DELETE /api/students/:id] Error deleting student:`, err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/students/:studentId/avatar — upload ảnh đại diện
 app.post('/api/students/:studentId/avatar', (req, res, next) => {
-  req.params.studentId = req.params.studentId; // ensure param accessible in multer filename
+  req.params.studentId = req.params.studentId;
   next();
 }, uploadAvatar.single('avatar'), async (req, res) => {
   try {
@@ -359,7 +438,6 @@ app.post('/api/students/:studentId/avatar', (req, res, next) => {
   }
 });
 
-// DELETE /api/students/:studentId/avatar — xóa ảnh đại diện
 app.delete('/api/students/:studentId/avatar', async (req, res) => {
   try {
     const [rows] = await pool.query('SELECT avatar_url FROM students WHERE id = ?', [req.params.studentId]);
@@ -375,7 +453,8 @@ app.delete('/api/students/:studentId/avatar', async (req, res) => {
   }
 });
 
-// POST /api/students/:studentId/behavior
+// ── Behavior ──────────────────────────────────────────────────────────────────
+
 app.post('/api/students/:studentId/behavior', async (req, res) => {
   try {
     const { studentId } = req.params;
@@ -392,7 +471,6 @@ app.post('/api/students/:studentId/behavior', async (req, res) => {
   }
 });
 
-// DELETE /api/behavior/:id
 app.delete('/api/behavior/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM behavior_records WHERE id = ?', [req.params.id]);
@@ -402,11 +480,14 @@ app.delete('/api/behavior/:id', async (req, res) => {
   }
 });
 
-// GET /api/seating-history — trả về 30 lần gần nhất
+// ── Seating History ───────────────────────────────────────────────────────────
+
 app.get('/api/seating-history', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const [rows] = await pool.query(
-      'SELECT * FROM seating_history ORDER BY created_at DESC LIMIT 30'
+      'SELECT * FROM seating_history WHERE classroom_id = ? ORDER BY created_at DESC LIMIT 30',
+      [classroomId]
     );
     const result = rows.map(r => ({
       ...r,
@@ -418,14 +499,14 @@ app.get('/api/seating-history', async (req, res) => {
   }
 });
 
-// POST /api/seating-history — lưu 1 snapshot
 app.post('/api/seating-history', async (req, res) => {
+  const classroomId = getClassroomId(req);
   try {
     const { snapshot, rows_count, cols_count, created_at, note } = req.body;
     const snapshotStr = typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot);
     const [result] = await pool.query(
-      'INSERT INTO seating_history (snapshot, rows_count, cols_count, created_at, note) VALUES (?, ?, ?, ?, ?)',
-      [snapshotStr, rows_count || 4, cols_count || 6, created_at, note || null]
+      'INSERT INTO seating_history (classroom_id, snapshot, rows_count, cols_count, created_at, note) VALUES (?, ?, ?, ?, ?, ?)',
+      [classroomId, snapshotStr, rows_count || 4, cols_count || 6, created_at, note || null]
     );
     res.json({ id: result.insertId });
   } catch (err) {
@@ -433,9 +514,9 @@ app.post('/api/seating-history', async (req, res) => {
   }
 });
 
-// 404 handler for debugging
+// ── 404 ───────────────────────────────────────────────────────────────────────
+
 app.use((req, res) => {
-  console.error(`[404] ${req.method} ${req.path} - Route not found`);
   res.status(404).json({ error: `Route not found: ${req.method} ${req.path}` });
 });
 

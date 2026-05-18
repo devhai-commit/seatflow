@@ -246,6 +246,7 @@ export default function SeatingChartPage({
 }: SeatingChartPageProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const [isViewPanelOpen, setIsViewPanelOpen] = useState(true);
 
   const handleExportDocx = async () => {
     if (seatingChart.length === 0) { alert('Sơ đồ lớp học trống.'); return; }
@@ -631,47 +632,74 @@ export default function SeatingChartPage({
           )}
         </div>
 
-        {/* View controls */}
+        {/* View controls - collapsible panel */}
         <div
-          className="fixed bottom-8 bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-2xl border border-[#c7c4d8] flex flex-col gap-4 z-30"
+          className="fixed bottom-8 z-30"
           style={{ left: '280px' }}
         >
-          <div className="flex items-center justify-between gap-8">
-            <span className="text-sm font-bold text-[#111c2d]">Chế độ xem</span>
-            <div className="bg-[#e7eeff] p-1 rounded-lg flex gap-1">
-              <button
-                onClick={() => setViewMode('2d')}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition-all ${viewMode === '2d' ? 'bg-white shadow-sm text-[#111c2d]' : 'text-[#464555]'}`}
-              >
-                2D
-              </button>
-              <button
-                onClick={() => setViewMode('3d')}
-                className={`px-3 py-1 rounded-md text-sm font-medium transition-all ${viewMode === '3d' ? 'bg-white shadow-sm text-[#111c2d]' : 'text-[#464555]'}`}
-              >
-                3D
-              </button>
-            </div>
-          </div>
-          {viewMode === '3d' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-4">
-                <span className="material-symbols-outlined text-[#777587] text-[20px]">3d_rotation</span>
-                <input
-                  type="range" min={0} max={60} value={rotation.x}
-                  onChange={e => setRotation({ ...rotation, x: Number(e.target.value) })}
-                  className="w-32 accent-[#3525cd]"
-                />
+          {isViewPanelOpen ? (
+            <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl shadow-2xl border border-[#c7c4d8] flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-6">
+                <span className="text-sm font-bold text-[#111c2d]">Chế độ xem</span>
+                <div className="flex items-center gap-2">
+                  <div className="bg-[#e7eeff] p-1 rounded-lg flex gap-1">
+                    <button
+                      onClick={() => setViewMode('2d')}
+                      className={`px-3 py-1 rounded-md text-sm font-medium transition-all ${viewMode === '2d' ? 'bg-white shadow-sm text-[#111c2d]' : 'text-[#464555]'}`}
+                    >
+                      2D
+                    </button>
+                    <button
+                      onClick={() => setViewMode('3d')}
+                      className={`px-3 py-1 rounded-md text-sm font-medium transition-all ${viewMode === '3d' ? 'bg-white shadow-sm text-[#111c2d]' : 'text-[#464555]'}`}
+                    >
+                      3D
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setIsViewPanelOpen(false)}
+                    title="Thu gọn"
+                    className="p-1.5 text-[#777587] hover:text-[#3525cd] hover:bg-[#e7eeff] rounded-lg transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">expand_more</span>
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="material-symbols-outlined text-[#777587] text-[20px]">height</span>
-                <input
-                  type="range" min={-30} max={30} value={rotation.y}
-                  onChange={e => setRotation({ ...rotation, y: Number(e.target.value) })}
-                  className="w-32 accent-[#3525cd]"
-                />
-              </div>
+              {viewMode === '3d' && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-[#777587] text-[18px]">3d_rotation</span>
+                    <input
+                      type="range" min={0} max={60} value={rotation.x}
+                      onChange={e => setRotation({ ...rotation, x: Number(e.target.value) })}
+                      className="w-28 accent-[#3525cd]"
+                    />
+                    <span className="text-[10px] text-[#777587] w-6">{rotation.x}°</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-[#777587] text-[18px]">height</span>
+                    <input
+                      type="range" min={-30} max={30} value={rotation.y}
+                      onChange={e => setRotation({ ...rotation, y: Number(e.target.value) })}
+                      className="w-28 accent-[#3525cd]"
+                    />
+                    <span className="text-[10px] text-[#777587] w-6">{rotation.y}°</span>
+                  </div>
+                </div>
+              )}
             </div>
+          ) : (
+            <button
+              onClick={() => setIsViewPanelOpen(true)}
+              title={`Chế độ xem: ${viewMode.toUpperCase()} — Mở rộng`}
+              className="flex items-center gap-1.5 px-3 py-2 bg-white/90 backdrop-blur-md border border-[#c7c4d8] rounded-xl shadow-lg text-sm font-medium text-[#111c2d] hover:bg-[#e7eeff] transition-colors"
+            >
+              <span className="material-symbols-outlined text-[#3525cd] text-[16px]">
+                {viewMode === '3d' ? 'view_in_ar' : 'table_chart'}
+              </span>
+              <span className="text-xs font-bold text-[#3525cd]">{viewMode.toUpperCase()}</span>
+              <span className="material-symbols-outlined text-[14px] text-[#777587]">expand_less</span>
+            </button>
           )}
         </div>
 
